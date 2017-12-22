@@ -21,6 +21,11 @@ func NewConfigDiff(diff [][]interface{}) ConfigDiff {
 	}
 }
 
+type DiffConfigError struct {
+	Code        int    `json:code`
+	Description string `json:description`
+}
+
 func (c Client) postConfigDiff(path string, manifest []byte, setHeaders func(*http.Request)) (ConfigDiffResponse, error) {
 	var resp ConfigDiffResponse
 
@@ -30,7 +35,17 @@ func (c Client) postConfigDiff(path string, manifest []byte, setHeaders func(*ht
 			// return empty diff, just for compatibility with directors which don't have the endpoint
 			return resp, nil
 		} else {
-			return resp, bosherr.WrapErrorf(err, "Fetching diff result")
+			//diffConfigError := DiffConfigError{}
+
+			//subMessageErr := json.Unmarshal([]byte(err.Error()), &diffConfigError)
+			//if subMessageErr == nil {
+			//	return resp, bosherr.Error(diffConfigError.Description)
+			//} else {
+			//	return resp, bosherr.Error(subMessageErr.Error())
+			//}
+			return resp, bosherr.Error(err.Error())
+
+			return resp, bosherr.WrapError(err, "Fetching diff result")
 		}
 	}
 
