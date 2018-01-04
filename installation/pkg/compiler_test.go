@@ -36,8 +36,8 @@ var _ = Describe("PackageCompiler", func() {
 	var (
 		logger                  boshlog.Logger
 		compiler                bistatepkg.Compiler
+		pkg                     birelpkg.Compilable
 		runner                  *fakesys.FakeCmdRunner
-		pkg                     *birelpkg.Package
 		fs                      *fakesys.FakeFileSystem
 		compressor              *fakecmd.FakeCompressor
 		packagesDir             string
@@ -68,8 +68,10 @@ var _ = Describe("PackageCompiler", func() {
 
 		dependency1 = birelpkg.NewPackage(NewResource("pkg-dep1-name", "", nil), nil)
 		dependency2 = birelpkg.NewPackage(NewResource("pkg-dep2-name", "", nil), nil)
-		pkg = birelpkg.NewExtractedPackage(NewResource("pkg1-name", "", nil), []string{"pkg-dep1-name", "pkg-dep2-name"}, "/pkg-dir", fs)
-		pkg.AttachDependencies([]*birelpkg.Package{dependency1, dependency2})
+
+		uncompiledPkg := birelpkg.NewExtractedPackage(NewResource("pkg1-name", "", nil), []string{"pkg-dep1-name", "pkg-dep2-name"}, "/pkg-dir", fs)
+		uncompiledPkg.AttachDependencies([]*birelpkg.Package{dependency1, dependency2})
+		pkg = uncompiledPkg
 
 		compiler = NewPackageCompiler(
 			runner,
@@ -322,6 +324,26 @@ var _ = Describe("PackageCompiler", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Attempting to find compiled package 'pkg1-name'"))
 				Expect(err.Error()).To(ContainSubstring("fake-error"))
+			})
+		})
+
+		Context("when the package is already compiled", func() {
+			BeforeEach(func() {
+				pkg = birelpkg.NewCompiledPackageWithArchive("[kg1-name", "", "/pkg-dir", "/archive.tgz", "sha1", nil)
+			})
+
+			It("skips the compilation", func() {
+				_, _, err := compiler.Compile(pkg)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(len(runner.RunComplexCommands)).To(Equal(0))
+			})
+
+			It("moves the compressed package to a blobstore", func() {
+				_, _, err := compiler.Compile(pkg)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(blobstore.CreateArgsForCall(0)).To(Equal("/archive.tgz"))
 			})
 		})
 	})
