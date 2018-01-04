@@ -64,63 +64,22 @@ func (c *compiler) Compile(pkg birelpkg.Compilable) (bistatepkg.CompiledPackageR
 		return record, isCompiledPackage, nil
 	}
 
-	c.logger.Debug(c.logTag, "Installing dependencies of package '%s/%s'", pkg.Name(), pkg.Fingerprint())
+	var tarball string
+	if pkg.IsCompiled() {
+		tarball = pkg.(*birelpkg.CompiledPackage).ArchivePath()
+	} else {
+		tarball, err = c.compilePackage(pkg)
 
-	err = c.installPackages(pkg.Deps())
-	if err != nil {
-		return record, isCompiledPackage, bosherr.WrapErrorf(err, "Installing dependencies of package '%s'", pkg.Name())
-	}
-
-	defer func() {
-		if err = c.fileSystem.RemoveAll(c.packagesDir); err != nil {
-			c.logger.Warn(c.logTag, "Failed to remove packages dir: %s", err.Error())
+		if err != nil {
+			return record, isCompiledPackage, err
 		}
-	}()
 
-	c.logger.Debug(c.logTag, "Compiling package '%s/%s'", pkg.Name(), pkg.Fingerprint())
-
-	installDir := filepath.Join(c.packagesDir, pkg.Name())
-
-	err = c.fileSystem.MkdirAll(installDir, os.ModePerm)
-	if err != nil {
-		return record, isCompiledPackage, bosherr.WrapError(err, "Creating package install dir")
+		defer func() {
+			if err = c.compressor.CleanUp(tarball); err != nil {
+				c.logger.Warn(c.logTag, "Failed to clean up tarball: %s", err.Error())
+			}
+		}()
 	}
-
-	packageSrcDir := pkg.(*birelpkg.Package).ExtractedPath()
-
-	if !c.fileSystem.FileExists(filepath.Join(packageSrcDir, "packaging")) {
-		return record, isCompiledPackage, bosherr.Errorf("Packaging script for package '%s' not found", pkg.Name())
-	}
-
-	cmd := boshsys.Command{
-		Name: "bash",
-		Args: []string{"-x", "packaging"},
-		Env: map[string]string{
-			"BOSH_COMPILE_TARGET": packageSrcDir,
-			"BOSH_INSTALL_TARGET": installDir,
-			"BOSH_PACKAGE_NAME":   pkg.Name(),
-			"BOSH_PACKAGES_DIR":   c.packagesDir,
-			"PATH":                "/usr/local/bin:/usr/bin:/bin",
-		},
-		UseIsolatedEnv: true,
-		WorkingDir:     packageSrcDir,
-	}
-
-	_, _, _, err = c.runner.RunComplexCommand(cmd)
-	if err != nil {
-		return record, isCompiledPackage, bosherr.WrapError(err, "Compiling package")
-	}
-
-	tarball, err := c.compressor.CompressFilesInDir(installDir)
-	if err != nil {
-		return record, isCompiledPackage, bosherr.WrapError(err, "Compressing compiled package")
-	}
-
-	defer func() {
-		if err = c.compressor.CleanUp(tarball); err != nil {
-			c.logger.Warn(c.logTag, "Failed to clean up tarball: %s", err.Error())
-		}
-	}()
 
 	blobID, digest, err := c.blobstore.Create(tarball)
 	if err != nil {
@@ -160,4 +119,60 @@ func (c *compiler) installPackages(packages []birelpkg.Compilable) error {
 	}
 
 	return nil
+}
+
+func (c *compiler) compilePackage(pkg birelpkg.Compilable) (string, error) {
+	c.logger.Debug(c.logTag, "Installing dependencies of package '%s/%s'", pkg.Name(), pkg.Fingerprint())
+
+	err := c.installPackages(pkg.Deps())
+	if err != nil {
+		return "", bosherr.WrapErrorf(err, "Installing dependencies of package '%s'", pkg.Name())
+	}
+
+	defer func() {
+		if err = c.fileSystem.RemoveAll(c.packagesDir); err != nil {
+			c.logger.Warn(c.logTag, "Failed to remove packages dir: %s", err.Error())
+		}
+	}()
+
+	c.logger.Debug(c.logTag, "Compiling package '%s/%s'", pkg.Name(), pkg.Fingerprint())
+
+	installDir := filepath.Join(c.packagesDir, pkg.Name())
+
+	err = c.fileSystem.MkdirAll(installDir, os.ModePerm)
+	if err != nil {
+		return "", bosherr.WrapError(err, "Creating package install dir")
+	}
+
+	packageSrcDir := pkg.(*birelpkg.Package).ExtractedPath()
+
+	if !c.fileSystem.FileExists(filepath.Join(packageSrcDir, "packaging")) {
+		return "", bosherr.Errorf("Packaging script for package '%s' not found", pkg.Name())
+	}
+
+	cmd := boshsys.Command{
+		Name: "bash",
+		Args: []string{"-x", "packaging"},
+		Env: map[string]string{
+			"BOSH_COMPILE_TARGET": packageSrcDir,
+			"BOSH_INSTALL_TARGET": installDir,
+			"BOSH_PACKAGE_NAME":   pkg.Name(),
+			"BOSH_PACKAGES_DIR":   c.packagesDir,
+			"PATH":                "/usr/local/bin:/usr/bin:/bin",
+		},
+		UseIsolatedEnv: true,
+		WorkingDir:     packageSrcDir,
+	}
+
+	_, _, _, err = c.runner.RunComplexCommand(cmd)
+	if err != nil {
+		return "", bosherr.WrapError(err, "Compiling package")
+	}
+
+	tarball, err := c.compressor.CompressFilesInDir(installDir)
+	if err != nil {
+		return "", bosherr.WrapError(err, "Compressing compiled package")
+	}
+
+	return tarball, nil
 }
