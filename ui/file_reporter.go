@@ -25,26 +25,15 @@ func (r FileReporter) Write(b []byte) (int, error) {
 }
 
 func (r FileReporter) TrackUpload(size int64, reader io.ReadCloser) ReadSeekCloser {
-	return &ReadCloserProxy{reader: reader, bar: r.buildBar(size), ui: r.ui}
+	return nil
 }
 
 func (r FileReporter) TrackDownload(size int64, writer io.Writer) io.Writer {
-	return io.MultiWriter(writer, r.buildBar(size))
+	return nil
 }
 
 func (r FileReporter) buildBar(size int64) *pb.ProgressBar {
-	bar := pb.New(int(size))
-	bar.Output = r
-	bar.NotPrint = true
-	bar.ShowCounters = false
-	bar.ShowTimeLeft = true
-	bar.ShowSpeed = true
-	bar.SetWidth(80)
-	bar.SetMaxWidth(80)
-	bar.SetUnits(pb.U_BYTES)
-	bar.Format("\x00#\x00#\x00 \x00")
-	bar.Start()
-	return bar
+	return nil
 }
 
 type ReadCloserProxy struct {
